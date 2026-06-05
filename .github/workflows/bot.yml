@@ -18,11 +18,11 @@ on:
       bot1_name:
         description: 'Bot 1 Name'
         required: true
-        default: 'Rahul Sharma'
+        default: '24BFA33L10 MANISH'
       bot2_name:
         description: 'Bot 2 Name'
         required: true
-        default: 'Priya Patel'
+        default: '24BFA33L19 SOWMYA SREE'
       duration_minutes:
         description: 'Duration in minutes'
         required: true
