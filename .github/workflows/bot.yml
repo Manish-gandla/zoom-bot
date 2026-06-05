@@ -1,59 +1,77 @@
-name: Zoom Bot Run
+name: Zoom Bot - Two Participants
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
     inputs:
-      duration_minutes:
-        description: 'Duration in minutes'
+      meeting_url:
+        description: 'Zoom Meeting URL'
         required: true
-        default: '60'
+        default: 'https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1'
+  push:
+    branches: [ main ]
 
 jobs:
-  run-zoom-bot:
+  bot-1:
+    name: 'Bot 1 - Rahul Sharma'
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.11'
-
-      - name: Install system dependencies
+          node-version: '20'
+      
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --fix-missing \
-            ca-certificates \
-            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
-            libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 \
-            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-            libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
-            libsystemd0 libx11-xcb1 libxcb1 libxshmfence1
-
-      - name: Install Playwright
-        run: |
-          pip install playwright
-          python -m playwright install --with-deps chromium
-
-      - name: Verify
-        run: python -c "from playwright.sync_api import sync_playwright; print('Playwright OK')"
-
-      - name: Run Bot
-        run: |
-          DURATION="${{ github.event.inputs.duration_minutes }}"
-          if [ -z "$DURATION" ]; then DURATION=60; fi
-          SECONDS=$(( DURATION * 60 ))
-          python zoom_bot.py "" "$SECONDS"
-
-      - name: Upload screenshots
-        if: always()
+          npm install playwright
+          npx playwright install chromium
+      
+      - name: Run Bot 1 (Rahul Sharma)
+        env:
+          MEETING_URL: ${{ github.event.inputs.meeting_url || 'https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1' }}
+          BOT_NAME: 'Rahul Sharma'
+          STAY_DURATION: '3600'
+          SCREENSHOT_DIR: 'artifacts'
+        run: node zoomBot.js
+      
+      - name: Upload artifacts for Bot 1
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: screenshots
-          path: "*.png"
+          name: bot1-rahul-sharma
+          path: artifacts/
+          retention-days: 7
+
+  bot-2:
+    name: 'Bot 2 - Priya Patel'
+    needs: bot-1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: |
+          npm install playwright
+          npx playwright install chromium
+      
+      - name: Run Bot 2 (Priya Patel)
+        env:
+          MEETING_URL: ${{ github.event.inputs.meeting_url || 'https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1' }}
+          BOT_NAME: 'Priya Patel'
+          STAY_DURATION: '3600'
+          SCREENSHOT_DIR: 'artifacts'
+        run: node zoomBot.js
+      
+      - name: Upload artifacts for Bot 2
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bot2-priya-patel
+          path: artifacts/
           retention-days: 7
