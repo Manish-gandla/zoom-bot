@@ -24,16 +24,16 @@ jobs:
     timeout-minutes: 360
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -63,28 +63,29 @@ jobs:
             libxshmfence1 \
             libfontconfig1 \
             libfreetype6
-      
+
       - name: Install Playwright
         run: |
           pip install playwright
-      
-      - name: Install Chromium using playwright
+
+      - name: Install Chromium
         run: |
           python -m playwright install chromium
-      
+
       - name: Verify installation
         run: |
           python -c "from playwright.sync_api import sync_playwright; print('Playwright installed OK')"
-      
+
       - name: Run Zoom Bots
         run: |
-          DURATION_SECONDS=$(( ${{ github.event.inputs.duration_minutes }} * 60 ))
-          python zoom_bot.py \
-            "" \
-            "${{ github.event.inputs.bot1_name }}" \
-            "${{ github.event.inputs.bot2_name }}" \
-            "$DURATION_SECONDS"
-      
+          DURATION="${{ github.event.inputs.duration_minutes }}"
+          if [ -z "$DURATION" ]; then
+            DURATION=60
+          fi
+          DURATION_SECONDS=$(( DURATION * 60 ))
+          echo "Duration: $DURATION minutes ($DURATION_SECONDS seconds)"
+          python zoom_bot.py "" "${{ github.event.inputs.bot1_name }}" "${{ github.event.inputs.bot2_name }}" "$DURATION_SECONDS"
+
       - name: Upload debug screenshots
         if: always()
         uses: actions/upload-artifact@v4
