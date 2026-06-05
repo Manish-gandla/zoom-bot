@@ -22,8 +22,6 @@ jobs:
   run-zoom-bot:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout repository
@@ -39,30 +37,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --fix-missing \
             ca-certificates \
-            libgbm-dev \
-            libnss3 \
-            libnspr4 \
-            libatk1.0-0t64 \
-            libatk-bridge2.0-0t64 \
-            libcups2t64 \
-            libdrm2 \
-            libdbus-1-3 \
-            libexpat1 \
-            libxkbcommon0 \
-            libxcomposite1 \
-            libxdamage1 \
-            libxfixes3 \
-            libxrandr2 \
-            libgbm1 \
-            libpango-1.0-0 \
-            libcairo2 \
-            libasound2t64 \
-            libsystemd0 \
-            libx11-xcb1 \
-            libxcb1 \
-            libxshmfence1 \
-            libfontconfig1 \
-            libfreetype6
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+            libsystemd0 libx11-xcb1 libxcb1 libxshmfence1
 
       - name: Install Playwright
         run: |
@@ -70,26 +49,23 @@ jobs:
 
       - name: Install Chromium
         run: |
-          python -m playwright install chromium
+          python -m playwright install --with-deps chromium
 
-      - name: Verify installation
+      - name: Verify
         run: |
-          python -c "from playwright.sync_api import sync_playwright; print('Playwright installed OK')"
+          python -c "from playwright.sync_api import sync_playwright; print('OK')"
 
-      - name: Run Zoom Bots
+      - name: Run Bot
         run: |
           DURATION="${{ github.event.inputs.duration_minutes }}"
-          if [ -z "$DURATION" ]; then
-            DURATION=60
-          fi
-          DURATION_SECONDS=$(( DURATION * 60 ))
-          echo "Duration: $DURATION minutes ($DURATION_SECONDS seconds)"
-          python zoom_bot.py "" "${{ github.event.inputs.bot1_name }}" "${{ github.event.inputs.bot2_name }}" "$DURATION_SECONDS"
+          if [ -z "$DURATION" ]; then DURATION=60; fi
+          SECONDS=$(( DURATION * 60 ))
+          python zoom_bot.py "" "${{ github.event.inputs.bot1_name }}" "${{ github.event.inputs.bot2_name }}" "$SECONDS"
 
-      - name: Upload debug screenshots
+      - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-screenshots
+          name: screenshots
           path: step*.png
           retention-days: 7
