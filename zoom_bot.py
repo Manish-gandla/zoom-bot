@@ -35,43 +35,16 @@ def jitter(base, variance=0.3):
     return base + random.uniform(-variance * base, variance * base)
 
 
-async def click_text(page, texts, timeout=10):
-    """
-    Wait for an element containing any of the given texts, then click it.
-    Returns True if clicked, False if not found within timeout seconds.
-    """
-    for text in texts:
-        try:
-            # Try button
-            btn = await page.wait_for_selector(f"button:has-text('{text}')", timeout=timeout * 1000)
-            if btn:
-                await btn.click()
-                print(f"  ✅ Clicked: '{text}'")
-                return True
-        except:
-            pass
-        try:
-            # Try anchor/div/span
-            el = await page.wait_for_selector(f"a:has-text('{text}'), div[role='button']:has-text('{text}'), span:has-text('{text}')", timeout=timeout * 1000)
-            if el:
-                await el.click()
-                print(f"  ✅ Clicked: '{text}'")
-                return True
-        except:
-            pass
-    return False
-
-
-async def click_button_evaluate(page, text_parts):
-    """Click using JavaScript evaluate for more reliability."""
-    parts_json = str(text_parts)
+async def click_by_text_js(page, texts):
+    """Click any element containing given text using JavaScript."""
+    texts_json = str(texts)
     result = await page.evaluate(f"""() => {{
-        const parts = {parts_json};
+        const texts = {texts_json};
         const allEls = document.querySelectorAll('button, a, div[role="button"], span[role="button"], input[type="submit"], input[type="button"]');
         for (const el of allEls) {{
             const t = (el.textContent || el.value || '').toLowerCase().trim();
-            for (const p of parts) {{
-                if (t.includes(p.toLowerCase())) {{
+            for (const s of texts) {{
+                if (t.includes(s.toLowerCase())) {{
                     el.click();
                     return 'clicked';
                 }}
@@ -79,13 +52,21 @@ async def click_button_evaluate(page, text_parts):
         }}
         return 'not-found';
     }}""")
-    if result == 'clicked':
-        print(f"  ✅ Clicked via JS: {text_parts[0]}...")
-        return True
+    return 'clicked' in result
+
+
+async def click_text_with_wait(page, texts, max_attempts=15):
+    """Keep trying to click a button with given text for max_attempts times."""
+    for i in range(max_attempts):
+        if await click_by_text_js(page, texts):
+            print(f"  ✅ Clicked: {texts[0]}")
+            return True
+        await asyncio.sleep(jitter(1.5))
+    print(f"  ⚠️ Not found: {texts[0]}")
     return False
 
 
-async def fill_form_fields(page, values):
+async def fill_form(page, values):
     """Fill visible text inputs in order."""
     filled = 0
     inputs = await page.query_selector_all("input:not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button'])")
@@ -102,27 +83,6 @@ async def fill_form_fields(page, values):
                 filled += 1
         except:
             pass
-    
-    # Fallback for remaining fields
-    if filled < len(values):
-        remaining = values[filled:]
-        for selector, val in [
-            ("input[placeholder*='irst'], input[aria-label*='irst'], input[name='firstName']", remaining[0] if len(remaining) > 0 else None),
-            ("input[placeholder*='ast'], input[aria-label*='ast'], input[name='lastName']", remaining[1] if len(remaining) > 1 else None),
-            ("input[type='email'], input[placeholder*='email'], input[aria-label*='email'], input[name='email']", remaining[2] if len(remaining) > 2 else None),
-        ]:
-            if val:
-                try:
-                    el = await page.query_selector(selector)
-                    if el:
-                        curr = await el.input_value()
-                        if not curr:
-                            await el.click()
-                            await asyncio.sleep(0.2)
-                            await el.fill(val, delay=random.randint(40, 120))
-                            print(f"  ✅ Filled (fallback): {val}")
-                except:
-                    pass
     return filled
 
 
@@ -147,165 +107,126 @@ async def run_single_bot(first_name, last_name, email, display_name, duration):
         await context.add_init_script(STEALTH_SCRIPT)
         page = await context.new_page()
 
-        # =============================================================
-        # OPEN LINK
-        # =============================================================
+        # ---- OPEN LINK ----
         print(f"[1] Opening Zoom link...")
         await page.goto(JOIN_URL, wait_until="domcontentloaded", timeout=60000)
         await asyncio.sleep(jitter(5.0))
         await page.screenshot(path=f"01_{first_name}.png")
 
-        # Handle cookie popup if present
-        await click_text(page, ["Accept all cookies", "Accept All Cookies", "Accept all", "Accept"], timeout=3)
-        await asyncio.sleep(jitter(2.0))
+        # Handle cookie popup
+        await click_text_with_wait(page, ["Accept all cookies", "Accept All Cookies", "Accept"], max_attempts=5)
 
         # =============================================================
-        # STEP 1: Fill form (First Name, Last Name, Email)
+        # STEP 1: Click "Join from Browser"
         # =============================================================
-        print(f"[2] Filling form: First Name, Last Name, Email...")
-        await asyncio.sleep(jitter(2.0))
-        await fill_form_fields(page, [first_name, last_name, email])
-
-        # =============================================================
-        # STEP 2: Click "Register and Join"
-        # =============================================================
-        print(f"[3] Looking for 'Register and Join'...")
-        await asyncio.sleep(jitter(1.0))
-        for attempt in range(10):
-            found = await click_button_evaluate(page, ["register and join", "register", "join meeting", "submit", "join now"])
-            if found:
-                break
-            await asyncio.sleep(jitter(1.5))
+        print(f"[2] Clicking 'Join from Browser'...")
+        await click_text_with_wait(page, [
+            "join from your browser",
+            "join from browser",
+            "from your browser",
+            "browser"
+        ], max_attempts=15)
         await asyncio.sleep(jitter(4.0))
+        await page.screenshot(path=f"02_{first_name}.png")
 
         # =============================================================
-        # STEP 3: Click "Continue without audio and video"
+        # STEP 2: Fill form (First Name, Last Name, Email)
         # =============================================================
-        print(f"[4] Looking for 'Continue without audio and video'...")
-        for attempt in range(10):
-            found = await click_button_evaluate(page, [
-                "continue without audio and video",
-                "continue without",
-                "continue",
-                "skip",
-                "no thanks",
-                "don't connect audio"
-            ])
-            if found:
-                break
-            await asyncio.sleep(jitter(1.5))
-        await asyncio.sleep(jitter(3.0))
+        print(f"[3] Filling form...")
+        await asyncio.sleep(jitter(2.0))
+        await fill_form(page, [first_name, last_name, email])
+        await page.screenshot(path=f"03_{first_name}.png")
 
         # =============================================================
-        # STEP 4: Click "Join from Browser"
+        # STEP 3: Click "Register and Join"
         # =============================================================
-        print(f"[5] Looking for 'Join from Browser'...")
-        
-        # Try text-based click first
-        browser_found = False
-        for attempt in range(10):
-            found = await click_button_evaluate(page, [
-                "join from your browser",
-                "join from browser",
-                "from your browser",
-                "browser"
-            ])
-            if found:
-                browser_found = True
-                break
-            # Also try clicking any link containing "browser"
-            try:
-                link = await page.query_selector("a:has-text('browser'), a:has-text('Browser')")
-                if link:
-                    await link.click()
-                    print(f"  ✅ Clicked browser link (direct)")
-                    browser_found = True
-                    break
-            except:
-                pass
-            await asyncio.sleep(jitter(1.5))
-        
-        if not browser_found:
-            # Fallback: go to WC URL directly
-            try:
-                wc_url = "https://bytexl-in.zoom.us/wc/join/87508297509"
-                await page.goto(wc_url, wait_until="domcontentloaded", timeout=30000)
-                await asyncio.sleep(jitter(4.0))
-                print(f"  Used direct WC URL (fallback)")
-            except:
-                pass
-        
+        print(f"[4] Clicking 'Register and Join'...")
+        await click_text_with_wait(page, [
+            "register and join",
+            "register",
+            "join meeting",
+            "submit",
+            "join now"
+        ], max_attempts=15)
+        await asyncio.sleep(jitter(4.0))
+        await page.screenshot(path=f"04_{first_name}.png")
+
+        # =============================================================
+        # STEP 4: Click "Continue without audio and video"
+        # =============================================================
+        print(f"[5] Clicking 'Continue without audio and video'...")
+        await click_text_with_wait(page, [
+            "continue without audio and video",
+            "continue without",
+            "continue",
+            "skip",
+            "no thanks"
+        ], max_attempts=15)
         await asyncio.sleep(jitter(3.0))
+        await page.screenshot(path=f"05_{first_name}.png")
 
         # =============================================================
         # STEP 5: Click "Continue without microphone and camera" (1st)
         # =============================================================
         print(f"[6] First 'Continue without microphone and camera'...")
-        for attempt in range(10):
-            found = await click_button_evaluate(page, [
-                "continue without microphone and camera",
-                "continue without microphone",
-                "continue without camera",
-                "continue without",
-                "continue",
-                "skip",
-                "no thanks",
-                "don't allow",
-                "block"
-            ])
-            if found:
-                break
-            await asyncio.sleep(jitter(1.5))
+        await click_text_with_wait(page, [
+            "continue without microphone and camera",
+            "continue without microphone",
+            "continue without camera",
+            "continue without",
+            "continue",
+            "skip",
+            "don't allow",
+            "block"
+        ], max_attempts=15)
         await asyncio.sleep(jitter(3.0))
+        await page.screenshot(path=f"06_{first_name}.png")
 
         # =============================================================
         # STEP 6: Click "Continue without microphone and camera" (2nd)
         # =============================================================
         print(f"[7] Second 'Continue without microphone and camera'...")
-        for attempt in range(10):
-            found = await click_button_evaluate(page, [
-                "continue without microphone and camera",
-                "continue without microphone",
-                "continue without camera",
-                "continue without",
-                "continue",
-                "skip",
-                "no thanks",
-                "don't allow",
-                "block"
-            ])
-            if found:
-                break
-            await asyncio.sleep(jitter(1.5))
+        await click_text_with_wait(page, [
+            "continue without microphone and camera",
+            "continue without microphone",
+            "continue without camera",
+            "continue without",
+            "continue",
+            "skip",
+            "don't allow",
+            "block"
+        ], max_attempts=15)
         await asyncio.sleep(jitter(3.0))
+        await page.screenshot(path=f"07_{first_name}.png")
 
         # =============================================================
         # STEP 7: Click "Join"
         # =============================================================
-        print(f"[8] Looking for 'Join'...")
-        for attempt in range(10):
-            found = await click_button_evaluate(page, [
-                "join",
-                "join meeting",
-                "join now",
-                "enter meeting",
-                "join the meeting",
-                "enter"
-            ])
-            if found:
-                break
-            await asyncio.sleep(jitter(1.5))
-        
+        print(f"[8] Clicking 'Join'...")
+        await click_text_with_wait(page, [
+            "join",
+            "join meeting",
+            "join now",
+            "enter meeting",
+            "join the meeting",
+            "enter"
+        ], max_attempts=15)
         await asyncio.sleep(jitter(5.0))
+        await page.screenshot(path=f"08_{first_name}.png")
 
-        # Handle "Join with Computer Audio" inside meeting
+        # =============================================================
+        # Handle audio prompt inside meeting
+        # =============================================================
         print(f"[9] Checking for audio prompt...")
         await asyncio.sleep(jitter(3.0))
-        await click_button_evaluate(page, [
-            "join with computer audio", "join audio", "listen only",
-            "use computer audio", "join audio by computer"
-        ])
+        await click_text_with_wait(page, [
+            "join with computer audio",
+            "join audio",
+            "listen only",
+            "use computer audio"
+        ], max_attempts=5)
         await asyncio.sleep(jitter(3.0))
+        await page.screenshot(path=f"09_{first_name}.png")
 
         # =============================================================
         # CHECK IF IN MEETING
@@ -326,8 +247,6 @@ async def run_single_bot(first_name, last_name, email, display_name, duration):
             print(f"[10] ✅ SUCCESS: IN THE MEETING!")
         else:
             print(f"[10] ❌ NOT in meeting. URL: {page.url}")
-
-        await page.screenshot(path=f"10_final_{first_name}.png")
 
         # =============================================================
         # STAY IN MEETING
