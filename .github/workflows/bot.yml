@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -32,28 +32,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --fix-missing \
-            ca-certificates \
-            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
-            libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 \
-            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-            libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+            ca-certificates libnss3 libnspr4 libatk1.0-0t64 \
+            libatk-bridge2.0-0t64 libcups2t64 libdrm2 libdbus-1-3 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+            libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
             libsystemd0 libx11-xcb1 libxcb1 libxshmfence1
-
-      - name: Install Playwright
-        run: |
           pip install playwright
-
-      - name: Install Chromium
-        run: |
           python -m playwright install --with-deps chromium
-
-      - name: Verify
-        run: |
-          python -c "from playwright.sync_api import sync_playwright; print('OK')"
 
       - name: Run Bot
         run: |
@@ -67,5 +56,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: step*.png
-          retention-days: 7
+          path: "*.png"
+          retention-days: 3
