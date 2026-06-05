@@ -5,14 +5,6 @@ on:
     branches: [main, master]
   workflow_dispatch:
     inputs:
-      bot1_name:
-        description: 'Bot 1 Name'
-        required: true
-        default: 'Rahul Sharma'
-      bot2_name:
-        description: 'Bot 2 Name'
-        required: true
-        default: 'Priya Patel'
       duration_minutes:
         description: 'Duration in minutes'
         required: true
@@ -32,24 +24,31 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --fix-missing \
-            ca-certificates libnss3 libnspr4 libatk1.0-0t64 \
-            libatk-bridge2.0-0t64 libcups2t64 libdrm2 libdbus-1-3 \
-            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
-            libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
+            ca-certificates \
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64 \
             libsystemd0 libx11-xcb1 libxcb1 libxshmfence1
+
+      - name: Install Playwright
+        run: |
           pip install playwright
           python -m playwright install --with-deps chromium
+
+      - name: Verify
+        run: python -c "from playwright.sync_api import sync_playwright; print('Playwright OK')"
 
       - name: Run Bot
         run: |
           DURATION="${{ github.event.inputs.duration_minutes }}"
           if [ -z "$DURATION" ]; then DURATION=60; fi
           SECONDS=$(( DURATION * 60 ))
-          python zoom_bot.py "" "${{ github.event.inputs.bot1_name }}" "${{ github.event.inputs.bot2_name }}" "$SECONDS"
+          python zoom_bot.py "" "$SECONDS"
 
       - name: Upload screenshots
         if: always()
@@ -57,4 +56,4 @@ jobs:
         with:
           name: screenshots
           path: "*.png"
-          retention-days: 3
+          retention-days: 7
