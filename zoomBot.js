@@ -16,223 +16,307 @@ function log(msg) {
   console.log(`[${new Date().toISOString()}] [${BOT_NAME}] ${msg}`);
 }
 
-async function sleep(ms) {
+function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
 async function screenshot(page, name) {
-  const fp = path.join(SCREENSHOT_DIR, `${BOT_NAME.replace(/\s+/g, '_')}_${name}.png`);
-  await page.screenshot({ path: fp, fullPage: false });
-  log(`📸 ${name}`);
-}
-
-async function clickByText(page, text, timeout = 5000) {
-  // Strategy 1: button with text
   try {
-    const btn = page.locator(`button:has-text("${text}")`).first();
-    await btn.waitFor({ state: 'visible', timeout: 3000 });
-    await btn.click({ force: true, timeout: 3000 });
-    log(`  ✅ Clicked button: "${text}"`);
-    return true;
+    const fp = path.join(SCREENSHOT_DIR, `${BOT_NAME.replace(/\s+/g, '_')}_${name}.png`);
+    await page.screenshot({ path: fp });
   } catch (e) {
-    // Strategy 2: any element with exact text
-    try {
-      const el = page.locator(`text="${text}"`).first();
-      await el.waitFor({ state: 'visible', timeout: 2000 });
-      await el.click({ force: true });
-      log(`  ✅ Clicked text: "${text}"`);
-      return true;
-    } catch (e2) {
-      // Strategy 3: any element containing text (case-insensitive)
-      try {
-        const el = page.getByText(text, { exact: false }).first();
-        await el.waitFor({ state: 'visible', timeout: 2000 });
-        await el.click({ force: true });
-        log(`  ✅ Clicked containing: "${text}"`);
-        return true;
-      } catch (e3) {
-        return false;
-      }
-    }
+    log(`Screenshot failed: ${e.message}`);
   }
 }
 
-async function clickBySelector(page, selector, timeout = 5000) {
+/**
+ * Analyze the current page state and return what buttons/text are visible.
+ */
+async function analyzePage(page) {
+  return await page.evaluate(() => {
+    const results = { buttons: [], headings: [], texts: [], inputs: [], dialogs: [] };
+
+    // Collect all visible button text
+    document.querySelectorAll('button, a, [role="button"], span[role="button"], input[type="submit"]').forEach(el => {
+      if (el.offsetParent !== null) {
+        const text = el.innerText?.trim() || el.value?.trim() || el.textContent?.trim() || '';
+        if (text) results.buttons.push(text);
+      }
+    });
+
+    // Collect visible headings
+    document.querySelectorAll('h1, h2, h3, h4, [role="heading"]').forEach(el => {
+      if (el.offsetParent !== null) {
+        const text = el.innerText?.trim() || '';
+        if (text) results.headings.push(text);
+      }
+    });
+
+    // Collect visible text blocks (smaller phrases)
+    document.querySelectorAll('p, label, div.zoom-text, span.zoom-text, [class*="message"], [class*="description"]').forEach(el => {
+      if (el.offsetParent !== null) {
+        const text = el.innerText?.trim() || '';
+        if (text && text.length < 200) results.texts.push(text);
+      }
+    });
+
+    // Collect input placeholders
+    document.querySelectorAll('input:not([type="hidden"])').forEach(el => {
+      if (el.offsetParent !== null) {
+        const placeholder = el.placeholder || '';
+        const id = el.id || '';
+        const name = el.name || '';
+        const type = el.type || '';
+        if (placeholder || id || name) results.inputs.push({ placeholder, id, name, type });
+      }
+    });
+
+    // Check for dialogs/modals
+    document.querySelectorAll('[role="dialog"], [role="alertdialog"], .modal, .dialog').forEach(el => {
+      if (el.offsetParent !== null) {
+        results.dialogs.push(el.innerText?.trim()?.substring(0, 200) || '');
+      }
+    });
+
+    return results;
+  });
+}
+
+/**
+ * Check if the page has specific text visible (case-insensitive).
+ */
+async function pageHasText(page, text) {
   try {
-    const el = page.locator(selector).first();
-    await el.waitFor({ state: 'visible', timeout });
-    await el.click({ force: true });
-    log(`  ✅ Clicked selector: "${selector}"`);
-    return true;
-  } catch (e) {
+    return await page.locator(`:has-text("${text}")`).first().isVisible({ timeout: 2000 });
+  } catch {
     return false;
   }
 }
 
-async function handlePotentialPasscode(page) {
-  log('  Checking for passcode input...');
-  const passcodeSelectors = [
-    'input[type="password"]',
-    'input[placeholder*="passcode" i]',
-    'input[placeholder*="password" i]',
-    'input[id*="passcode" i]',
-    'input[id*="password" i]',
-    'input[name*="passcode" i]',
-    'input[name*="password" i]',
-  ];
-  for (const sel of passcodeSelectors) {
-    try {
-      const input = page.locator(sel).first();
-      if (await input.isVisible({ timeout: 2000 })) {
-        await input.fill(MEETING_PASSWORD || '');
-        log(`  ✅ Filled passcode input: ${sel}`);
-        // Click the Join/Submit button next to it
-        await clickByText(page, 'Join', 3000);
-        return true;
-      }
-    } catch (e) {}
-  }
-  return false;
-}
-
-async function handlePotentialNameInput(page) {
-  log('  Checking for name input...');
-  const nameSelectors = [
-    'input[placeholder*="Name" i]',
-    'input[placeholder*="name" i]',
-    'input[id*="name" i]',
-    'input[name*="name" i]',
-    'input[data-testid*="name" i]',
-    'input[aria-label*="name" i]',
-    'input[aria-label*="Name" i]',
-  ];
-  for (const sel of nameSelectors) {
-    try {
-      const input = page.locator(sel).first();
-      if (await input.isVisible({ timeout: 2000 })) {
-        await input.fill('');
-        await input.fill(BOT_NAME);
-        log(`  ✅ Filled name: "${BOT_NAME}" via ${sel}`);
-        // Check for "Turn off my video" checkbox
-        await clickByText(page, 'Turn off my video', 2000);
-        await clickByText(page, 'Mute my microphone', 2000);
-        return true;
-      }
-    } catch (e) {}
-  }
-  return false;
-}
-
-async function handleMicCameraDialog(page) {
-  log('  Handling mic/camera permission dialog...');
-  
-  // Check for browser-level permission prompt
+/**
+ * Click the first visible button that contains the given text.
+ */
+async function clickVisibleButton(page, text) {
   try {
-    const dialog = page.locator('div[role="dialog"]').first();
-    if (await dialog.isVisible({ timeout: 2000 })) {
-      // Try various "continue without" buttons
-      const continueTexts = [
-        'Continue without microphone and camera',
-        'Continue without',
-        'continue without',
-        'Continue',
-        'Skip',
-        'Not now',
-        'Dismiss',
-      ];
-      for (const txt of continueTexts) {
-        if (await clickByText(page, txt, 2000)) {
-          await sleep(3000);
+    // Try getByRole first (only finds visible elements)
+    const btn = page.getByRole('button', { name: text, exact: false }).first();
+    if (await btn.isVisible({ timeout: 2000 })) {
+      await btn.click();
+      log(`  ✅ Clicked button: "${text}" (getByRole)`);
+      return true;
+    }
+  } catch {}
+
+  try {
+    // Try text locator filtered to visible
+    const btn = page.getByText(text, { exact: false }).first();
+    if (await btn.isVisible({ timeout: 2000 })) {
+      await btn.click({ force: true });
+      log(`  ✅ Clicked text: "${text}" (getByText)`);
+      return true;
+    }
+  } catch {}
+
+  try {
+    // Fallback: button with has-text
+    const btn = page.locator(`button:has-text("${text}")`).first();
+    if (await btn.isVisible({ timeout: 2000 })) {
+      await btn.click({ force: true });
+      log(`  ✅ Clicked button: "${text}" (has-text)`);
+      return true;
+    }
+  } catch {}
+
+  // Last resort: evaluate and click in page context
+  try {
+    const clicked = await page.evaluate((searchText) => {
+      const elements = document.querySelectorAll('button, a, [role="button"], span[role="button"], input[type="submit"]');
+      for (const el of elements) {
+        if (el.offsetParent !== null) {
+          const t = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+          if (t.includes(searchText.toLowerCase())) {
+            el.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    }, text);
+    if (clicked) {
+      log(`  ✅ Clicked via evaluate: "${text}"`);
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/**
+ * Fill the name input if visible.
+ */
+async function fillNameIfVisible(page) {
+  try {
+    // Check for any text input that looks like a name field
+    const input = page.locator('input[placeholder*="name" i], input[placeholder*="Name" i], input[id*="name" i], input[aria-label*="name" i], input[aria-label*="Name" i]').first();
+    if (await input.isVisible({ timeout: 2000 })) {
+      await input.fill('');
+      await input.fill(BOT_NAME);
+      log(`  ✅ Filled name: "${BOT_NAME}"`);
+      return true;
+    }
+  } catch {}
+  
+  // Check for any visible text input on a join page
+  try {
+    const inputs = page.locator('input[type="text"]');
+    const count = await inputs.count();
+    for (let i = 0; i < count; i++) {
+      const input = inputs.nth(i);
+      if (await input.isVisible()) {
+        const ph = await input.getAttribute('placeholder');
+        if (!ph || ph.toLowerCase().includes('name') || ph.toLowerCase().includes('your')) {
+          await input.fill('');
+          await input.fill(BOT_NAME);
+          log(`  ✅ Filled name via text input #${i}: "${BOT_NAME}"`);
           return true;
         }
       }
-      // Try all buttons in the dialog
-      const buttons = dialog.locator('button, a, span[role="button"]');
-      const count = await buttons.count();
-      for (let i = 0; i < count; i++) {
-        try {
-          await buttons.nth(i).click({ force: true });
-          log(`  ✅ Clicked dialog button #${i}`);
-          await sleep(3000);
-          return true;
-        } catch (e) {}
+    }
+  } catch {}
+  
+  return false;
+}
+
+/**
+ * Fill the passcode input if visible.
+ */
+async function fillPasscodeIfVisible(page) {
+  try {
+    const input = page.locator('input[type="password"], input[placeholder*="passcode" i], input[placeholder*="password" i]').first();
+    if (await input.isVisible({ timeout: 2000 })) {
+      await input.fill(MEETING_PASSWORD);
+      log(`  ✅ Filled passcode`);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+/**
+ * Core logic: Continuously analyze page state and take action.
+ * Returns true when we believe we're in the meeting.
+ */
+async function joinMeeting(page) {
+  const MAX_ITERATIONS = 30; // Safety limit
+  const BUTTON_PRIORITY = [
+    // Highest priority - buttons we want to click
+    'Join from your Browser',
+    'Join from Browser',
+    'join from your browser',
+    'Join from browser',
+    'Continue without microphone and camera',
+    'Continue without',
+    'continue without microphone and camera',
+    'Join',
+    'Join Audio',
+    'Join Audio By Computer',
+    'Join with Computer Audio',
+    'Allow',
+    'Allow All',
+    'Cancel',
+    'Dismiss',
+    'Skip',
+    'Not now',
+  ];
+
+  let iteration = 0;
+
+  while (iteration < MAX_ITERATIONS) {
+    iteration++;
+    await sleep(2000); // Brief pause between checks
+
+    // 1. Analyze current page state
+    const state = await analyzePage(page);
+    log(`\n--- Analysis #${iteration} ---`);
+    log(`  Buttons visible: [${state.buttons.join(' | ')}]`);
+    if (state.headings.length) log(`  Headings: [${state.headings.join(' | ')}]`);
+    if (state.texts.length) log(`  Messages: [${state.texts.slice(0, 3).join(' | ')}]`);
+    if (state.inputs.length) log(`  Inputs: [${state.inputs.map(i => i.placeholder || i.id || i.name).join(' | ')}]`);
+
+    await screenshot(page, `state_${String(iteration).padStart(2, '0')}`);
+
+    // 2. Check if we're already in the meeting
+    if (await pageHasText(page, 'Leave')) {
+      log('\n🎉 SUCCESS! Bot appears to be in the meeting!');
+      return true;
+    }
+    if (await pageHasText(page, 'Mute')) {
+      log('\n🎉 SUCCESS! Bot appears to be in the meeting (Mute button visible)!');
+      return true;
+    }
+    if (await pageHasText(page, 'Participants')) {
+      log('\n🎉 SUCCESS! Bot appears to be in the meeting (Participants visible)!');
+      return true;
+    }
+    if (await pageHasText(page, 'Waiting for the host')) {
+      log('\n⏳ Bot is in the waiting room. Waiting for host to admit...');
+      return true; // We're as far as we can go
+    }
+    if (await pageHasText(page, 'waiting for host')) {
+      log('\n⏳ Bot is in the waiting room.');
+      return true;
+    }
+
+    // 3. Fill passcode if present (always do this first)
+    await fillPasscodeIfVisible(page);
+
+    // 4. Fill name if present
+    await fillNameIfVisible(page);
+
+    // 5. Click buttons based on priority
+    let clicked = false;
+    for (const btnText of BUTTON_PRIORITY) {
+      if (await clickVisibleButton(page, btnText)) {
+        clicked = true;
+        await sleep(2000);
+        break;
       }
     }
-  } catch (e) {}
-  return false;
-}
 
-async function handleJoinFromBrowser(page) {
-  log('Step 1: Find "Join from Browser"...');
-  const selectors = [
-    'a:has-text("Join from your Browser")',
-    'a:has-text("Join from Browser")',
-    'button:has-text("Join from your Browser")',
-    'button:has-text("Join from Browser")',
-    'text=Join from your Browser',
-    'text=Join from Browser',
-    'a[href*="wc/join"]',
-  ];
-  for (const sel of selectors) {
-    try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 2000 })) {
-        await el.click({ force: true });
-        log(`  ✅ Clicked "Join from Browser"`);
+    if (!clicked) {
+      // If no priority buttons were found, check for any clickable buttons on a Zoom page
+      const anyClicked = await page.evaluate(() => {
+        const buttons = document.querySelectorAll('button, a, [role="button"]');
+        for (const btn of buttons) {
+          if (btn.offsetParent !== null && (btn.innerText || '').trim()) {
+            btn.click();
+            return btn.innerText.trim();
+          }
+        }
+        return null;
+      });
+      
+      if (anyClicked) {
+        log(`  ⚠️ Clicked generic button: "${anyClicked}"`);
+        await sleep(2000);
+      } else {
+        log('  ⏳ No clickable buttons found. Waiting...');
+        // Check if page is still loading or has an error
+        const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
+        log(`  Page body: ${bodyText.substring(0, 200)}`);
         await sleep(5000);
-        return true;
       }
-    } catch (e) {}
-  }
-  log('  ⚠️ No "Join from Browser" found - may already be on meeting page');
-  return false;
-}
+    }
 
-async function handleJoinButton(page) {
-  log('Step: Find "Join" button...');
-  
-  // First fill name if present
-  await handlePotentialNameInput(page);
-  
-  // Fill passcode if present  
-  await handlePotentialPasscode(page);
-  
-  // Try various Join button selectors
-  const joinSelectors = [
-    'button:has-text("Join")',
-    'button#joinBtn',
-    '#joinBtn',
-    'button[class*="join"]',
-    'input[type="submit"]',
-    'button[data-testid*="join"]',
-    '[data-testid*="join-button"]',
-    'button[aria-label*="Join"]',
-    '.join-btn',
-    'a:has-text("Join")',
-    'button:has-text("join")',
-  ];
-  
-  for (const sel of joinSelectors) {
-    try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 2000 })) {
-        await el.click({ force: true });
-        log(`  ✅ Clicked Join: "${sel}"`);
-        await sleep(5000);
-        return true;
-      }
-    } catch (e) {}
+    // Check for "started a meeting" or redirect to zoom app
+    if (await pageHasText(page, 'Open Zoom')) {
+      log('  ⚠️ Zoom asking to open desktop app - looking for browser link...');
+      await clickVisibleButton(page, 'Join from your Browser');
+    }
   }
-  
-  // Final fallback: click any "Join" text
-  try {
-    await page.getByText('Join', { exact: true }).first().click({ force: true });
-    log('  ✅ Clicked Join text (fallback)');
-    await sleep(5000);
-    return true;
-  } catch (e) {
-    return false;
-  }
+
+  log('\n❌ Reached max iterations without joining meeting.');
+  return false;
 }
 
 async function run() {
@@ -247,7 +331,6 @@ async function run() {
       '--disable-blink-features=AutomationControlled',
       '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',
-      '--disable-web-security',
     ],
   });
 
@@ -261,90 +344,58 @@ async function run() {
   });
 
   const page = await context.newPage();
-  
-  // Log console messages from the page
-  page.on('console', msg => {
-    if (msg.type() === 'error') log(`[PAGE ERROR] ${msg.text()}`);
-  });
+
+  // Log page errors
+  page.on('pageerror', err => log(`[PAGE ERROR] ${err.message}`));
 
   try {
-    log(`Starting bot: ${BOT_NAME}`);
-    
-    // Navigate
-    await page.goto(MEETING_URL, { waitUntil: 'networkidle', timeout: 60000 });
-    await screenshot(page, '00_landed');
+    log(`🚀 Starting bot: ${BOT_NAME}`);
+    log(`🌐 Navigating to meeting...`);
+
+    await page.goto(MEETING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await sleep(5000);
+    await screenshot(page, 'initial');
 
-    // Step 1: Join from Browser
-    await handleJoinFromBrowser(page);
-    await screenshot(page, '01_after_join_browser');
-    await sleep(3000);
+    // Run the dynamic join flow
+    const joined = await joinMeeting(page);
 
-    // Step 2: Handle any mic/camera dialog
-    await handleMicCameraDialog(page);
-    await screenshot(page, '02_after_permission');
-    await sleep(3000);
-
-    // Step 3: Handle second dialog (if present)
-    await handleMicCameraDialog(page);
-    await screenshot(page, '03_after_permission2');
-    await sleep(3000);
-
-    // Step 4: Handle name/passcode and click Join
-    await handleJoinButton(page);
-    await screenshot(page, '04_after_join');
-
-    // Wait and check state
-    await sleep(10000);
-    await screenshot(page, '05_post_join_check');
-
-    // Check if in meeting
-    const inMeeting = await checkInMeeting(page);
-    
-    if (inMeeting) {
-      log(`🎉 SUCCESS! ${BOT_NAME} is in the meeting! Staying for ${STAY_DURATION}s`);
-      for (let i = 0; i < Math.floor(STAY_DURATION / 300); i++) {
+    if (joined) {
+      log(`\n✅ ${BOT_NAME} is connected! Staying for ${STAY_DURATION}s`);
+      
+      // Take periodic screenshots
+      const intervals = Math.floor(STAY_DURATION / 300);
+      for (let i = 0; i < intervals; i++) {
         await sleep(300000);
-        await screenshot(page, `staying_${i + 1}`);
+        await screenshot(page, `connected_${i + 1}`);
+        log(`Still connected... (${((i + 1) * 5)}min)`);
       }
+      
+      log('✅ Stay duration complete. Leaving.');
     } else {
-      log('❌ Not in meeting - staying for debugging');
-      await sleep(30000);
+      log('\n❌ Could not join meeting. Final screenshots saved.');
+      await sleep(15000);
+      await screenshot(page, 'failed_final');
+      
+      // Print final state
+      const finalState = await analyzePage(page);
+      log(`\n--- Final page state ---`);
+      log(`  Buttons: [${finalState.buttons.join(' | ')}]`);
+      log(`  Headings: [${finalState.headings.join(' | ')}]`);
     }
 
   } catch (err) {
-    log(`ERROR: ${err.message}`);
-    await screenshot(page, 'error');
+    log(`\n💥 FATAL ERROR: ${err.message}`);
+    await screenshot(page, 'fatal_error');
   } finally {
     await screenshot(page, 'final');
     await page.close();
     await context.close();
     await browser.close();
+    log('🏁 Bot finished.');
   }
 }
 
-async function checkInMeeting(page) {
-  const indicators = [
-    'button[aria-label*="Mute" i]',
-    'button[aria-label*="Leave" i]',
-    'text=Participants',
-    'text=Leave Meeting',
-    'text=Leave',
-    '[class*="in-meeting"]',
-    '[class*="meeting-ui"]',
-    'text=Waiting for the host',
-    'text=waiting for host',
-    '[class*="waiting-room"]',
-  ];
-  for (const sel of indicators) {
-    try {
-      if (await page.locator(sel).first().isVisible({ timeout: 2000 })) {
-        log(`  ✅ In-meeting indicator found: "${sel}"`);
-        return true;
-      }
-    } catch (e) {}
-  }
-  return false;
-}
-
-run().catch(err => { console.error(err); process.exit(1); });
+run().catch(err => {
+  console.error('Unhandled:', err);
+  process.exit(1);
+});
