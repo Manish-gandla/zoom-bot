@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       meeting_url:
-        description: 'Zoom Meeting Join URL (with tk and pwd)'
+        description: 'Zoom Meeting Join URL'
         required: true
         default: 'https://bytexl-in.zoom.us/w/87508297509?tk=...'
 
@@ -28,57 +28,95 @@ jobs:
           const path = require('path');
           
           const MEETING_URL = process.env.MEETING_URL;
-          const BOT_NAME = process.env.BOT_NAME || 'Bot';
-          const SCREENSHOT_DIR = 'screenshots';
+          const BOT_NAME = process.env.BOT_NAME;
           const b64name = Buffer.from(BOT_NAME).toString('base64');
           const wait = ms => new Promise(r => setTimeout(r, ms));
           
           async function shot(page, label) {
-            if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-            await page.screenshot({ path: path.join(SCREENSHOT_DIR, `${BOT_NAME.replace(/\s+/g,'_')}_${label}.png`), fullPage: true });
-            console.log('Screenshot:', label);
+            const d = 'screenshots';
+            if (!fs.existsSync(d)) fs.mkdirSync(d);
+            await page.screenshot({ path: path.join(d, `${BOT_NAME.replace(/\s+/g,'_')}_${label}.png`), fullPage: true });
           }
           
-          async function logPage(page, label) {
-            const text = await page.evaluate(() => document.body.innerText.substring(0,1500));
+          async function logState(page, label) {
             console.log(`\n=== ${label} ===`);
-            console.log(text);
+            console.log(await page.evaluate(() => document.body.innerText.substring(0,2000)));
+            console.log('URL:', page.url());
+            // Check for iframes
+            const iframes = await page.evaluate(() => {
+              return Array.from(document.querySelectorAll('iframe')).map(f => f.src || f.id || f.name);
+            });
+            if (iframes.length > 0) console.log('IFRAMES:', iframes);
+            const buttons = await page.evaluate(() => {
+              return Array.from(document.querySelectorAll('button')).map(b => ({ text: b.textContent.trim().substring(0,50), visible: b.offsetWidth > 0 && b.offsetHeight > 0 }));
+            });
+            console.log('BUTTONS found:', buttons.filter(b => b.visible).length);
+            buttons.filter(b => b.visible).forEach(b => console.log('  Button:', b.text));
             console.log('================\n');
           }
           
-          async function clickAny(page, patterns) {
-            for (const pt of patterns) {
-              // getByRole
-              const r = page.getByRole('button', { name: new RegExp(pt, 'i') });
-              if ((await r.count()) > 0 && (await r.first().isVisible())) {
-                await r.first().click(); console.log('CLICKED:', pt); return pt;
-              }
-              // getByText
-              const t = page.getByText(new RegExp(pt, 'i'));
-              for (let i = 0; i < (await t.count()); i++) {
-                if (await t.nth(i).isVisible()) {
-                  await t.nth(i).click().catch(() => {});
-                  console.log('CLICKED:', pt); return pt;
+          async function clickSmart(page, texts) {
+            for (const text of texts) {
+              // Try button role
+              try {
+                const btn = page.getByRole('button', { name: new RegExp(text, 'i') });
+                if ((await btn.count()) > 0) {
+                  const b = btn.first();
+                  if (await b.isVisible()) { await b.click(); console.log('CLICK role: '+text); return text; }
                 }
-              }
-              // DOM brute
-              const dom = await page.evaluate((s) => {
-                const q = s.toLowerCase();
-                for (const el of document.querySelectorAll('button,a,span[role="button"],[class*="btn"],[class*="join"],[class*="button"]')) {
-                  if ((el.textContent||'').toLowerCase().includes(q)) { const r=el.getBoundingClientRect(); if(r.width>0&&r.height>0){ el.click(); return true; } }
-                }
-                for (const el of document.querySelectorAll('*')) {
-                  if ((el.textContent||'').toLowerCase().includes(q)) {
-                    const r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top>=0) {
-                      (el.tagName==='BUTTON'||el.tagName==='A') ? el.click() : el.parentElement?.click();
-                      return true;
-                    }
+              } catch(e) {}
+              
+              // Try text match
+              try {
+                const loc = page.getByText(new RegExp(text, 'i'));
+                for (let i = 0; i < (await loc.count()); i++) {
+                  if (await loc.nth(i).isVisible()) {
+                    await loc.nth(i).click().catch(() => loc.nth(i).locator('..').click().catch(()=>{}));
+                    console.log('CLICK text: '+text); return text;
                   }
                 }
+              } catch(e) {}
+              
+              // Try all iframes too
+              for (const frame of page.frames()) {
+                try {
+                  const fbtn = frame.getByRole('button', { name: new RegExp(text, 'i') });
+                  if ((await fbtn.count()) > 0 && (await fbtn.first().isVisible())) {
+                    await fbtn.first().click();
+                    console.log('CLICK iframe-role: '+text); return text;
+                  }
+                } catch(e) {}
+                try {
+                  const ftxt = frame.getByText(new RegExp(text, 'i'));
+                  for (let i = 0; i < (await ftxt.count()); i++) {
+                    if (await ftxt.nth(i).isVisible()) {
+                      await ftxt.nth(i).click().catch(()=>{});
+                      console.log('CLICK iframe-text: '+text); return text;
+                    }
+                  }
+                } catch(e) {}
+              }
+              
+              // DOM brute force (ALL frames)
+              const dom = await page.evaluate((s) => {
+                const q = s.toLowerCase();
+                const search = (doc) => {
+                  for (const el of doc.querySelectorAll('button,a,span,[role="button"],[class*="btn"],[class*="button"],[class*="join"],[class*="action"]')) {
+                    if ((el.textContent||'').toLowerCase().includes(q) && el.offsetWidth > 0 && el.offsetHeight > 0) {
+                      el.click(); return true;
+                    }
+                  }
+                  return false;
+                };
+                if (search(document)) return true;
+                for (const iframe of document.querySelectorAll('iframe')) {
+                  try {
+                    if (iframe.contentDocument && search(iframe.contentDocument)) return true;
+                  } catch(e) {}
+                }
                 return false;
-              }, pt);
-              if (dom) { console.log('CLICKED DOM:', pt); return pt; }
+              }, text);
+              if (dom) { console.log('CLICK dom: '+text); return text; }
             }
             return null;
           }
@@ -86,7 +124,6 @@ jobs:
           async function run() {
             console.log(`\n🚀 ${BOT_NAME}`);
             const url = MEETING_URL + (MEETING_URL.includes('?')?'&':'?') + 'prefer=1&un=' + b64name;
-            console.log('URL:', url.substring(0,100)+'...');
             
             const browser = await chromium.launch({
               headless: true,
@@ -107,53 +144,65 @@ jobs:
             });
             
             const page = await ctx.newPage();
+            page.on('console', m => { if(m.type()==='error'||m.type()==='warning') console.log(`[PAGE] ${m.text()}`); });
             
             try {
-              await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-              await wait(5000);
-              await shot(page, '00_initial');
-              await logPage(page, 'PAGE STATE');
+              console.log('Navigating to:', url.substring(0,100)+'...');
+              await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+              await wait(6000);
+              await shot(page, '01_initial');
+              await logState(page, 'INITIAL LOAD');
               
-              const PATTERNS = [
-                'join from browser', 'join from your browser',
-                'continue without microphone', 'continue without camera', 'continue without',
-                'join audio', 'join with computer audio',
-                'join',
-                'mute', 'stop video', 'turn off microphone', 'turn off camera',
+              // Phase 1: Click "Join from browser" if present
+              console.log('\n--- PHASE 1: Join from browser ---');
+              const phase1 = ['join from browser', 'join from your browser', 'launch meeting', 'start from your browser'];
+              let clicked = await clickSmart(page, phase1);
+              if (clicked) {
+                await wait(8000); // Wait for page transition
+                await shot(page, '02_after_join_browser');
+                await logState(page, 'AFTER JOIN BROWSER');
+              }
+              
+              // Phase 2: Handle the meeting lobby - focus on ALL frames
+              console.log('\n--- PHASE 2: Meeting lobby ---');
+              const phase2 = [
+                'continue without microphone', 'continue without camera', 
+                'continue without', 'turn off microphone', 'turn off camera',
+                'stop video', 'mute', 'join audio', 'join with computer audio',
+                'join'
               ];
               
               let stuck = 0;
-              for (let i = 0; i < 40; i++) {
+              for (let i = 0; i < 30; i++) {
                 console.log(`\n--- Round ${i+1} ---`);
-                if (i % 2 === 0) await shot(page, `r${i}`);
+                await logState(page, `Round ${i+1}`);
                 
-                const clicked = await clickAny(page, PATTERNS);
+                // Check if already in meeting
+                const inMeeting = await page.evaluate(() => {
+                  const t = document.body.innerText.toLowerCase();
+                  return t.includes('leave meeting') || t.includes('end meeting') || t.includes('participants') || t.includes('chat') || t.includes('share screen') || t.includes('security') || t.includes('record');
+                });
+                if (inMeeting) {
+                  console.log('\n🎉 JOINED THE MEETING!');
+                  await shot(page, '03_joined');
+                  await wait(120000);
+                  break;
+                }
+                
+                clicked = await clickSmart(page, phase2);
                 if (clicked) {
-                  console.log('Action:', clicked);
                   stuck = 0;
                   await wait(5000);
-                  await logPage(page, `After ${clicked}`);
-                  
-                  // Check if joined
-                  const inMeeting = await page.evaluate(() => {
-                    const t = document.body.innerText.toLowerCase();
-                    return t.includes('leave') || t.includes('participants') || t.includes('chat') || t.includes('share screen') || t.includes('security');
-                  });
-                  if (inMeeting) {
-                    console.log('\n🎉 JOINED THE MEETING!');
-                    await shot(page, 'joined');
-                    await wait(60000);
-                    break;
-                  }
+                  await shot(page, `round_${i}`);
                 } else {
                   stuck++;
                   console.log('No match, stuck:', stuck);
-                  if (stuck >= 6) { await shot(page, 'stuck'); break; }
+                  if (stuck >= 5) { await shot(page, '04_stuck_final'); break; }
                   await wait(3000);
                 }
               }
             } catch(e) {
-              console.error('Error:', e.message);
+              console.error('Error:', e.message, e.stack);
               await shot(page,'error').catch(()=>{});
             } finally {
               await browser.close();
@@ -192,54 +241,87 @@ jobs:
           const path = require('path');
           
           const MEETING_URL = process.env.MEETING_URL;
-          const BOT_NAME = process.env.BOT_NAME || 'Bot';
-          const SCREENSHOT_DIR = 'screenshots';
+          const BOT_NAME = process.env.BOT_NAME;
           const b64name = Buffer.from(BOT_NAME).toString('base64');
           const wait = ms => new Promise(r => setTimeout(r, ms));
           
           async function shot(page, label) {
-            if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-            await page.screenshot({ path: path.join(SCREENSHOT_DIR, `${BOT_NAME.replace(/\s+/g,'_')}_${label}.png`), fullPage: true });
-            console.log('Screenshot:', label);
+            const d = 'screenshots';
+            if (!fs.existsSync(d)) fs.mkdirSync(d);
+            await page.screenshot({ path: path.join(d, `${BOT_NAME.replace(/\s+/g,'_')}_${label}.png`), fullPage: true });
           }
           
-          async function logPage(page, label) {
-            const text = await page.evaluate(() => document.body.innerText.substring(0,1500));
+          async function logState(page, label) {
             console.log(`\n=== ${label} ===`);
-            console.log(text);
+            console.log(await page.evaluate(() => document.body.innerText.substring(0,2000)));
+            console.log('URL:', page.url());
+            const iframes = await page.evaluate(() => {
+              return Array.from(document.querySelectorAll('iframe')).map(f => f.src || f.id || f.name);
+            });
+            if (iframes.length > 0) console.log('IFRAMES:', iframes);
+            const buttons = await page.evaluate(() => {
+              return Array.from(document.querySelectorAll('button')).map(b => ({ text: b.textContent.trim().substring(0,50), visible: b.offsetWidth > 0 && b.offsetHeight > 0 }));
+            });
+            console.log('BUTTONS found:', buttons.filter(b => b.visible).length);
+            buttons.filter(b => b.visible).forEach(b => console.log('  Button:', b.text));
             console.log('================\n');
           }
           
-          async function clickAny(page, patterns) {
-            for (const pt of patterns) {
-              const r = page.getByRole('button', { name: new RegExp(pt, 'i') });
-              if ((await r.count()) > 0 && (await r.first().isVisible())) {
-                await r.first().click(); console.log('CLICKED:', pt); return pt;
-              }
-              const t = page.getByText(new RegExp(pt, 'i'));
-              for (let i = 0; i < (await t.count()); i++) {
-                if (await t.nth(i).isVisible()) {
-                  await t.nth(i).click().catch(() => {});
-                  console.log('CLICKED:', pt); return pt;
+          async function clickSmart(page, texts) {
+            for (const text of texts) {
+              try {
+                const btn = page.getByRole('button', { name: new RegExp(text, 'i') });
+                if ((await btn.count()) > 0) {
+                  const b = btn.first();
+                  if (await b.isVisible()) { await b.click(); console.log('CLICK role: '+text); return text; }
                 }
+              } catch(e) {}
+              try {
+                const loc = page.getByText(new RegExp(text, 'i'));
+                for (let i = 0; i < (await loc.count()); i++) {
+                  if (await loc.nth(i).isVisible()) {
+                    await loc.nth(i).click().catch(() => loc.nth(i).locator('..').click().catch(()=>{}));
+                    console.log('CLICK text: '+text); return text;
+                  }
+                }
+              } catch(e) {}
+              for (const frame of page.frames()) {
+                try {
+                  const fbtn = frame.getByRole('button', { name: new RegExp(text, 'i') });
+                  if ((await fbtn.count()) > 0 && (await fbtn.first().isVisible())) {
+                    await fbtn.first().click();
+                    console.log('CLICK iframe-role: '+text); return text;
+                  }
+                } catch(e) {}
+                try {
+                  const ftxt = frame.getByText(new RegExp(text, 'i'));
+                  for (let i = 0; i < (await ftxt.count()); i++) {
+                    if (await ftxt.nth(i).isVisible()) {
+                      await ftxt.nth(i).click().catch(()=>{});
+                      console.log('CLICK iframe-text: '+text); return text;
+                    }
+                  }
+                } catch(e) {}
               }
               const dom = await page.evaluate((s) => {
                 const q = s.toLowerCase();
-                for (const el of document.querySelectorAll('button,a,span[role="button"],[class*="btn"],[class*="join"],[class*="button"]')) {
-                  if ((el.textContent||'').toLowerCase().includes(q)) { const r=el.getBoundingClientRect(); if(r.width>0&&r.height>0){ el.click(); return true; } }
-                }
-                for (const el of document.querySelectorAll('*')) {
-                  if ((el.textContent||'').toLowerCase().includes(q)) {
-                    const r=el.getBoundingClientRect();
-                    if(r.width>0&&r.height>0&&r.top>=0) {
-                      (el.tagName==='BUTTON'||el.tagName==='A') ? el.click() : el.parentElement?.click();
-                      return true;
+                const search = (doc) => {
+                  for (const el of doc.querySelectorAll('button,a,span,[role="button"],[class*="btn"],[class*="button"],[class*="join"],[class*="action"]')) {
+                    if ((el.textContent||'').toLowerCase().includes(q) && el.offsetWidth > 0 && el.offsetHeight > 0) {
+                      el.click(); return true;
                     }
                   }
+                  return false;
+                };
+                if (search(document)) return true;
+                for (const iframe of document.querySelectorAll('iframe')) {
+                  try {
+                    if (iframe.contentDocument && search(iframe.contentDocument)) return true;
+                  } catch(e) {}
                 }
                 return false;
-              }, pt);
-              if (dom) { console.log('CLICKED DOM:', pt); return pt; }
+              }, text);
+              if (dom) { console.log('CLICK dom: '+text); return text; }
             }
             return null;
           }
@@ -247,7 +329,6 @@ jobs:
           async function run() {
             console.log(`\n🚀 ${BOT_NAME}`);
             const url = MEETING_URL + (MEETING_URL.includes('?')?'&':'?') + 'prefer=1&un=' + b64name;
-            console.log('URL:', url.substring(0,100)+'...');
             
             const browser = await chromium.launch({
               headless: true,
@@ -268,52 +349,62 @@ jobs:
             });
             
             const page = await ctx.newPage();
+            page.on('console', m => { if(m.type()==='error'||m.type()==='warning') console.log(`[PAGE] ${m.text()}`); });
             
             try {
-              await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-              await wait(5000);
-              await shot(page, '00_initial');
-              await logPage(page, 'PAGE STATE');
+              console.log('Navigating to:', url.substring(0,100)+'...');
+              await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+              await wait(6000);
+              await shot(page, '01_initial');
+              await logState(page, 'INITIAL LOAD');
               
-              const PATTERNS = [
-                'join from browser', 'join from your browser',
-                'continue without microphone', 'continue without camera', 'continue without',
-                'join audio', 'join with computer audio',
-                'join',
-                'mute', 'stop video', 'turn off microphone', 'turn off camera',
+              console.log('\n--- PHASE 1: Join from browser ---');
+              const phase1 = ['join from browser', 'join from your browser', 'launch meeting', 'start from your browser'];
+              let clicked = await clickSmart(page, phase1);
+              if (clicked) {
+                await wait(8000);
+                await shot(page, '02_after_join_browser');
+                await logState(page, 'AFTER JOIN BROWSER');
+              }
+              
+              console.log('\n--- PHASE 2: Meeting lobby ---');
+              const phase2 = [
+                'continue without microphone', 'continue without camera', 
+                'continue without', 'turn off microphone', 'turn off camera',
+                'stop video', 'mute', 'join audio', 'join with computer audio',
+                'join'
               ];
               
               let stuck = 0;
-              for (let i = 0; i < 40; i++) {
+              for (let i = 0; i < 30; i++) {
                 console.log(`\n--- Round ${i+1} ---`);
-                if (i % 2 === 0) await shot(page, `r${i}`);
+                await logState(page, `Round ${i+1}`);
                 
-                const clicked = await clickAny(page, PATTERNS);
+                const inMeeting = await page.evaluate(() => {
+                  const t = document.body.innerText.toLowerCase();
+                  return t.includes('leave meeting') || t.includes('end meeting') || t.includes('participants') || t.includes('chat') || t.includes('share screen') || t.includes('security') || t.includes('record');
+                });
+                if (inMeeting) {
+                  console.log('\n🎉 JOINED THE MEETING!');
+                  await shot(page, '03_joined');
+                  await wait(120000);
+                  break;
+                }
+                
+                clicked = await clickSmart(page, phase2);
                 if (clicked) {
-                  console.log('Action:', clicked);
                   stuck = 0;
                   await wait(5000);
-                  await logPage(page, `After ${clicked}`);
-                  
-                  const inMeeting = await page.evaluate(() => {
-                    const t = document.body.innerText.toLowerCase();
-                    return t.includes('leave') || t.includes('participants') || t.includes('chat') || t.includes('share screen') || t.includes('security');
-                  });
-                  if (inMeeting) {
-                    console.log('\n🎉 JOINED THE MEETING!');
-                    await shot(page, 'joined');
-                    await wait(60000);
-                    break;
-                  }
+                  await shot(page, `round_${i}`);
                 } else {
                   stuck++;
                   console.log('No match, stuck:', stuck);
-                  if (stuck >= 6) { await shot(page, 'stuck'); break; }
+                  if (stuck >= 5) { await shot(page, '04_stuck_final'); break; }
                   await wait(3000);
                 }
               }
             } catch(e) {
-              console.error('Error:', e.message);
+              console.error('Error:', e.message, e.stack);
               await shot(page,'error').catch(()=>{});
             } finally {
               await browser.close();
