@@ -10,18 +10,20 @@ from playwright.async_api import async_playwright
 # ============================================================
 
 # The join link you received after registration
-JOIN_URL = "https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1"  # <-- PUT YOUR JOIN LINK HERE
+JOIN_URL = "https://bytexl-in.zoom.us/j/xxxxxxxxxx"  # <-- PUT YOUR JOIN LINK HERE
 
 # Bot 1 display name
-BOT1_NAME = "24BFA33L10 MANISH KUMAR"
+BOT1_NAME = "Rahul Sharma"
 
 # Bot 2 display name
-BOT2_NAME = "24BFA33L19 SOWMYA SREE"
+BOT2_NAME = "Priya Patel"
 
 # How long each bot stays (in seconds)
-# 3600 = 1 hour
+# 3600 = 1 hour, 7200 = 2 hours, 14400 = 4 hours
 DURATION_SECONDS = 3600
 
+# ============================================================
+# STEALTH ANTI-DETECTION SCRIPT
 # ============================================================
 STEALTH_SCRIPT = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -30,14 +32,17 @@ Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
 """
 
+
 async def human_type(page, selector, text):
     await page.click(selector)
     await asyncio.sleep(random.uniform(0.1, 0.3))
     for char in text:
         await page.keyboard.type(char, delay=random.randint(40, 120))
 
+
 def jitter(base, variance=0.3):
     return base + random.uniform(-variance * base, variance * base)
+
 
 async def click_button_by_text(page, text_parts):
     parts_json = json.dumps(text_parts)
@@ -56,11 +61,12 @@ async def click_button_by_text(page, text_parts):
         return 'not-found';
     }}""")
 
+
 async def run_single_bot(display_name, duration):
     print(f"\n{'='*50}")
     print(f"STARTING BOT: {display_name}")
     print(f"{'='*50}")
-    
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -89,7 +95,7 @@ async def run_single_bot(display_name, duration):
         await page.goto(JOIN_URL, wait_until="domcontentloaded", timeout=60000)
         await asyncio.sleep(jitter(4.0))
 
-        # Step 2: Enter name if needed
+        # Step 2: Enter name if prompted
         try:
             name_input = await page.query_selector("input[type='text']")
             if name_input:
@@ -97,6 +103,8 @@ async def run_single_bot(display_name, duration):
                 if not current:
                     await human_type(page, "input[type='text']", display_name)
                     print(f"[{display_name}] Name entered: {display_name}")
+                else:
+                    print(f"[{display_name}] Name already set: {current}")
         except:
             pass
 
@@ -131,16 +139,20 @@ async def run_single_bot(display_name, duration):
 
         # Step 5: Click Join
         await asyncio.sleep(jitter(2.0))
-        result = await click_button_by_text(page, ["join", "join meeting", "join now"])
+        result = await click_button_by_text(page, ["join", "join meeting", "join now", "join the meeting"])
         print(f"[{display_name}] Join clicked: {result}")
 
-        # Step 6: Handle launch dialog
+        # Step 6: Handle launch/zoom dialog
         await asyncio.sleep(jitter(4.0))
-        await click_button_by_text(page, ["launch meeting", "open zoom", "launch", "open link"])
+        result = await click_button_by_text(page, ["launch meeting", "open zoom", "launch", "open link", "click here"])
+        if "clicked" in result:
+            print(f"[{display_name}] Launch dialog handled")
 
         # Step 7: Handle audio prompt inside meeting
         await asyncio.sleep(jitter(4.0))
-        await click_button_by_text(page, ["join with computer audio", "join audio", "listen only"])
+        result = await click_button_by_text(page, ["join with computer audio", "join audio", "listen only", "join via computer audio"])
+        if "clicked" in result:
+            print(f"[{display_name}] Audio prompt handled")
 
         # Step 8: Confirm in meeting
         await asyncio.sleep(jitter(3.0))
@@ -152,12 +164,13 @@ async def run_single_bot(display_name, duration):
             if check:
                 print(f"[{display_name}] ✅ SUCCESS: Bot is IN the meeting!")
             else:
-                print(f"[{display_name}] ⚠️ Could not confirm")
+                print(f"[{display_name}] ⚠️ Could not confirm — continuing anyway")
+                await page.screenshot(path=f"debug_{display_name.replace(' ', '_')}.png")
         except:
             pass
 
-        # Step 9: Stay in meeting
-        print(f"[{display_name}] 🕒 Staying for {duration//60} minutes...")
+        # Step 9: Stay in meeting (fake view)
+        print(f"[{display_name}] 🕒 Staying in meeting for {duration//60} minutes...")
         start = time.time()
         while time.time() - start < duration:
             await asyncio.sleep(random.randint(30, 60))
@@ -170,7 +183,7 @@ async def run_single_bot(display_name, duration):
                 try:
                     ok = await page.evaluate("""() => (document.body?.innerText || '').toLowerCase().includes('leave')""")
                     if not ok:
-                        print(f"[{display_name}] Disconnected")
+                        print(f"[{display_name}] ⚠️ Disconnected at {elapsed}s")
                         break
                 except:
                     break
@@ -180,18 +193,22 @@ async def run_single_bot(display_name, duration):
         await context.close()
         await browser.close()
 
+
 async def main():
     global JOIN_URL, BOT1_NAME, BOT2_NAME, DURATION_SECONDS
-    
-    if len(sys.argv) >= 2 and sys.argv[1].startswith("http"):
+
+    if len(sys.argv) >= 2 and sys.argv[1] and sys.argv[1].startswith("http"):
         JOIN_URL = sys.argv[1]
-    if len(sys.argv) >= 3:
+    if len(sys.argv) >= 3 and sys.argv[2]:
         BOT1_NAME = sys.argv[2]
-    if len(sys.argv) >= 4:
+    if len(sys.argv) >= 4 and sys.argv[3]:
         BOT2_NAME = sys.argv[3]
-    if len(sys.argv) >= 5:
-        DURATION_SECONDS = int(sys.argv[4])
-    
+    if len(sys.argv) >= 5 and sys.argv[4]:
+        try:
+            DURATION_SECONDS = int(sys.argv[4])
+        except ValueError:
+            print(f"[!] Invalid duration '{sys.argv[4]}', using default: {DURATION_SECONDS}s")
+
     print("=" * 60)
     print("  ZOOM BOT — FAKE LIVE LIKES")
     print(f"  Bot 1: {BOT1_NAME}")
@@ -202,6 +219,7 @@ async def main():
     await run_single_bot(BOT1_NAME, DURATION_SECONDS)
     await run_single_bot(BOT2_NAME, DURATION_SECONDS)
     print("\n✅ BOTH BOTS COMPLETED SUCCESSFULLY")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
