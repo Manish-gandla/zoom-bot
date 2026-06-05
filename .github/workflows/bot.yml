@@ -1,77 +1,61 @@
-name: Zoom Bot - Two Participants
+name: Zoom Meeting Bot
 
 on:
   workflow_dispatch:
     inputs:
       meeting_url:
-        description: 'Zoom Meeting URL'
+        description: 'Zoom Meeting Join URL'
         required: true
-        default: 'https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1'
-  push:
-    branches: [ main ]
+        default: 'https://bytexl-in.zoom.us/w/87508297509?tk=...'
 
 jobs:
-  bot-1:
-    name: 'Bot 1 - Rahul Sharma'
+  bot-rahul:
+    name: Bot 1 - Rahul Sharma
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      
+          node-version: 20
       - name: Install dependencies
         run: |
+          npm init -y
           npm install playwright
           npx playwright install chromium
-      
-      - name: Run Bot 1 (Rahul Sharma)
+      - name: Run Rahul Bot
         env:
-          MEETING_URL: ${{ github.event.inputs.meeting_url || 'https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1' }}
-          BOT_NAME: 'Rahul Sharma'
-          STAY_DURATION: '3600'
-          SCREENSHOT_DIR: 'artifacts'
-        run: node zoomBot.js
-      
-      - name: Upload artifacts for Bot 1
-        uses: actions/upload-artifact@v4
+          MEETING_URL: ${{ github.event.inputs.meeting_url }}
+          BOT_NAME: "Rahul Sharma"
+        run: node bot.js
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bot1-rahul-sharma
-          path: artifacts/
+          name: screenshots-rahul
+          path: screenshots/
           retention-days: 7
 
-  bot-2:
-    name: 'Bot 2 - Priya Patel'
-    needs: bot-1
+  bot-priya:
+    name: Bot 2 - Priya Patel
+    needs: bot-rahul
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      
+          node-version: 20
       - name: Install dependencies
         run: |
+          npm init -y
           npm install playwright
           npx playwright install chromium
-      
-      - name: Run Bot 2 (Priya Patel)
+      - name: Run Priya Bot
         env:
-          MEETING_URL: ${{ github.event.inputs.meeting_url || 'https://bytexl-in.zoom.us/w/87508297509?tk=Jwab1SSwtXE_pvbtNcHafwa2tqnfgysJfPZP7pS8Cz8.DQkAAAAUX-anJRZYb09MRWd2WFRDU0FwY2ZLY1ZKT2ZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&pwd=wloDbtKaR91Ui2VqKxn9yqIm92pw8c.1' }}
-          BOT_NAME: 'Priya Patel'
-          STAY_DURATION: '3600'
-          SCREENSHOT_DIR: 'artifacts'
-        run: node zoomBot.js
-      
-      - name: Upload artifacts for Bot 2
-        uses: actions/upload-artifact@v4
+          MEETING_URL: ${{ github.event.inputs.meeting_url }}
+          BOT_NAME: "Priya Patel"
+        run: node bot.js
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bot2-priya-patel
-          path: artifacts/
+          name: screenshots-priya
+          path: screenshots/
           retention-days: 7
